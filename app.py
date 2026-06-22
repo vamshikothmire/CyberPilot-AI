@@ -3,7 +3,63 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import os
 import re
+def extract_iocs(text):
 
+    ips = re.findall(
+        r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+        text
+    )
+
+    users = re.findall(
+        r"User:\s*(.*)",
+        text,
+        re.IGNORECASE
+    )
+
+    hosts = re.findall(
+        r"Host:\s*(.*)",
+        text,
+        re.IGNORECASE
+    )
+
+    return {
+        "IPs": list(set(ips)),
+        "Users": list(set(users)),
+        "Hosts": list(set(hosts))
+    }
+MITRE_DB = {
+    "powershell": {
+        "id": "T1059.001",
+        "technique": "PowerShell Execution"
+    },
+    "mimikatz": {
+        "id": "T1003",
+        "technique": "Credential Dumping"
+    },
+    "brute force": {
+        "id": "T1110",
+        "technique": "Brute Force"
+    },
+    "ransomware": {
+        "id": "T1486",
+        "technique": "Data Encrypted for Impact"
+    },
+    "encodedcommand": {
+        "id": "T1027",
+        "technique": "Obfuscated Files or Information"
+    }
+}
+def local_mitre_lookup(alert):
+
+    alert = alert.lower()
+
+    for keyword, data in MITRE_DB.items():
+
+        if keyword in alert:
+
+            return data
+
+    return None
 # -----------------------
 # CONFIG
 # -----------------------
@@ -151,6 +207,9 @@ Alert:
 
         response = model.generate_content(prompt)
         result = response.text
+        iocs = extract_iocs(alert)
+        local_match = local_mitre_lookup(alert)
+        
 
     st.success("Analysis Complete")
 
@@ -217,11 +276,12 @@ Alert:
     # TABS
     # -----------------------
 
-    tab1, tab2, tab3 = st.tabs(
+    tab1, tab2, tab3, tab4 = st.tabs(
         [
             "Incident Summary",
             "MITRE Mapping",
-            "Remediation"
+            "Remediation",
+            "IOCs"
         ]
     )
 
@@ -240,15 +300,21 @@ Alert:
 
     with tab2:
 
-        st.subheader("MITRE ATT&CK Mapping")
+        st.markdown("### MITRE ATT&CK Mapping")
+
+    if local_match:
+
+        st.success("Local Detection Engine Match")
+
+        st.json(local_match)
 
         st.info(
-            f"""
+        f"""
 MITRE ID: {mitre_id}
 
 Attack Type: {attack_type}
 """
-        )
+    )
 
     with tab3:
 
@@ -259,7 +325,11 @@ Attack Type: {attack_type}
             result,
             re.IGNORECASE | re.DOTALL
         )
+    with tab4:
 
+        st.markdown("### Indicators of Compromise")
+
+        st.json(iocs)
         if remediation_match:
             st.markdown(remediation_match.group(1))
         else:
