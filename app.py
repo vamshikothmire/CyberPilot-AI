@@ -49,6 +49,15 @@ MITRE_DB = {
         "technique": "Obfuscated Files or Information"
     }
 }
+RISK_RULES = {
+    "powershell": 8,
+    "encodedcommand": 9,
+    "mimikatz": 10,
+    "brute force": 7,
+    "brute-force": 7,
+    "ransomware": 10,
+    "credential dumping": 10
+}
 def local_mitre_lookup(alert):
 
     alert = alert.lower()
@@ -60,6 +69,21 @@ def local_mitre_lookup(alert):
             return data
 
     return None
+
+def calculate_risk(alert):
+
+    alert = alert.lower()
+
+    alert = alert.replace("-", " ")
+
+    highest_score = 3
+
+    for keyword, score in RISK_RULES.items():
+
+        if keyword in alert:
+            highest_score = max(highest_score, score)
+
+    return highest_score
 # -----------------------
 # CONFIG
 # -----------------------
@@ -209,6 +233,8 @@ Alert:
         result = response.text
         iocs = extract_iocs(alert)
         local_match = local_mitre_lookup(alert)
+        local_risk = calculate_risk(alert)
+
         
 
     st.success("Analysis Complete")
@@ -269,19 +295,20 @@ Alert:
     with col4:
         st.metric(
             "Risk Score",
-            risk_score
+            local_risk
         )
 
     # -----------------------
     # TABS
     # -----------------------
 
-    tab1, tab2, tab3, tab4 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
         [
             "Incident Summary",
             "MITRE Mapping",
             "Remediation",
-            "IOCs"
+            "IOCs",
+            "Executive Summary"
         ]
     )
 
@@ -327,10 +354,57 @@ Attack Type: {attack_type}
         )
     with tab4:
 
-        st.markdown("### Indicators of Compromise")
+        st.markdown("### IOC Intelligence")
 
         st.json(iocs)
-        if remediation_match:
-            st.markdown(remediation_match.group(1))
-        else:
-            st.markdown(result)
+
+    if iocs["IPs"]:
+
+        st.markdown("#### IP Analysis")
+
+        for ip in iocs["IPs"]:
+
+            if ip.startswith(("10.", "172.", "192.168.")):
+
+                st.success(
+                    f"{ip} → Private/Internal IP"
+                )
+
+            else:
+
+                st.error(
+                    f"{ip} → Public IP (Investigate)"
+                )
+    with tab5:
+
+        st.markdown("## Executive Summary")
+
+        st.write(
+        f"""
+Severity: {severity}
+
+Risk Score: {local_risk}
+
+Attack Type: {attack_type}
+
+MITRE Technique: {mitre_id}
+"""
+    )
+
+    if local_risk >= 8:
+
+        st.error(
+            "Immediate SOC investigation recommended."
+        )
+
+    elif local_risk >= 5:
+
+        st.warning(
+            "Medium priority incident."
+        )
+
+    else:
+
+        st.success(
+            "Low priority incident."
+        )
