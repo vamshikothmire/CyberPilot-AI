@@ -3,15 +3,22 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import os
 import re
-def extract_iocs(text):
+from datetime import datetime
+from io import BytesIO
 
-    ips = re.findall(
-        r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
-        text
-    )
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+
+
+# -----------------------
+# IOC ENGINE
+# -----------------------
+
+def extract_iocs(text):
+    ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
 
     users = re.findall(
-        r"User:\s*(.*)",
+        r"(?:User|Target User):\s*(.*)",
         text,
         re.IGNORECASE
     )
@@ -27,6 +34,12 @@ def extract_iocs(text):
         "Users": list(set(users)),
         "Hosts": list(set(hosts))
     }
+
+
+# -----------------------
+# LOCAL MITRE ENGINE
+# -----------------------
+
 MITRE_DB = {
     "powershell": {
         "id": "T1059.001",
@@ -49,6 +62,7 @@ MITRE_DB = {
         "technique": "Obfuscated Files or Information"
     }
 }
+
 RISK_RULES = {
     "powershell": 8,
     "encodedcommand": 9,
@@ -58,32 +72,89 @@ RISK_RULES = {
     "ransomware": 10,
     "credential dumping": 10
 }
-def local_mitre_lookup(alert):
+ATTACK_STAGES = {
+    "brute force": "Initial Access",
+    "powershell": "Execution",
+    "encodedcommand": "Execution",
+    "mimikatz": "Credential Access",
+    "ransomware": "Impact"
+}
 
+def local_mitre_lookup(alert):
     alert = alert.lower()
 
     for keyword, data in MITRE_DB.items():
-
         if keyword in alert:
-
             return data
 
     return None
 
+
 def calculate_risk(alert):
-
-    alert = alert.lower()
-
-    alert = alert.replace("-", " ")
-
+    alert = alert.lower().replace("-", " ")
     highest_score = 3
 
     for keyword, score in RISK_RULES.items():
-
         if keyword in alert:
             highest_score = max(highest_score, score)
 
     return highest_score
+
+
+def correlate_attack_chain(alert):
+
+    alert_lower = alert.lower()
+
+    stages = []
+
+    for keyword, stage in ATTACK_STAGES.items():
+
+        if keyword in alert_lower:
+
+            stages.append(stage)
+
+    return list(dict.fromkeys(stages))
+
+
+def build_timeline(stages):
+
+    timeline = []
+
+    counter = 1
+
+    for stage in stages:
+
+        timeline.append(
+            f"Step {counter}: {stage}"
+        )
+
+        counter += 1
+
+    return timeline
+# -----------------------
+# PDF ENGINE (v0.6)
+# -----------------------
+
+def generate_pdf_report(report_text):
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(buffer)
+    styles = getSampleStyleSheet()
+
+    elements = []
+
+    for line in report_text.split("\n"):
+        elements.append(Paragraph(line, styles["BodyText"]))
+        elements.append(Spacer(1, 4))
+
+    doc.build(elements)
+
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    return pdf
+
+
 # -----------------------
 # CONFIG
 # -----------------------
@@ -100,12 +171,8 @@ genai.configure(api_key=api_key)
 
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# -----------------------
-# PAGE CONFIG
-# -----------------------
-
 st.set_page_config(
-    page_title="CyberPilot AI",
+    page_title="CyberPilot AI v0.6",
     page_icon="🛡️",
     layout="wide"
 )
@@ -116,83 +183,64 @@ st.set_page_config(
 
 with st.sidebar:
 
-    st.title("🛡️ CyberPilot AI")
+    st.title("🛡️ CyberPilot AI v0.6")
 
     st.markdown("""
-### AI-Powered SOC Analyst
+### Features
 
-#### Features
-
-- Threat Detection
+- AI SOC Analysis
 - MITRE ATT&CK Mapping
-- Incident Analysis
-- Remediation Guidance
+- IOC Extraction
+- Threat Intelligence
 - Risk Scoring
+- Executive Summary
+- Incident Reports
+- PDF Export
 """)
 
     st.divider()
 
-    st.subheader("Example Alerts")
-
     example = st.selectbox(
-        "Choose Example Alert",
+        "Example Alert",
         [
             "None",
-
             """Event ID: 4104
 PowerShell EncodedCommand detected
 User: Administrator
 Host: WIN-DC01""",
-
             """Event ID: 4625
 50 failed login attempts detected
 Source IP: 192.168.1.50
 Target User: Administrator
 Host: DC01""",
-
-            """Mass file modifications detected
-Shadow copies deleted
-500 files encrypted in 2 minutes
-Host: FILE-SERVER01""",
-
             """Process Creation:
 mimikatz.exe
 
 LSASS memory access detected
 
 User: Administrator
-Host: WIN-DC01"""
+Host: WIN-DC01""",
+            """Mass file modifications detected
+Shadow copies deleted
+500 files encrypted in 2 minutes
+Host: FILE-SERVER01"""
         ]
     )
 
 # -----------------------
-# HEADER
+# MAIN
 # -----------------------
 
 st.title("🛡️ CyberPilot AI")
+st.caption("AI-Powered SOC Analyst Copilot")
 
-st.caption(
-    "AI-Powered SOC Analyst Copilot for Threat Detection, MITRE ATT&CK Mapping, and Incident Response"
-)
-
-# -----------------------
-# ALERT INPUT
-# -----------------------
-
-default_alert = ""
-
-if example != "None":
-    default_alert = example
+default_alert = "" if example == "None" else example
 
 alert = st.text_area(
     "Enter Security Alert",
     value=default_alert,
     height=220
 )
-
-# -----------------------
-# ANALYZE BUTTON
-# -----------------------
 
 if st.button("Analyze Alert", use_container_width=True):
 
@@ -203,208 +251,205 @@ if st.button("Analyze Alert", use_container_width=True):
     prompt = f"""
 You are a Senior SOC Analyst.
 
-Analyze the security alert.
+Analyze the alert.
 
-Return EXACTLY in this format:
+Return EXACTLY:
 
 Severity: <Critical/High/Medium/Low>
-
-Attack Type: <Attack Type>
-
+Attack Type: <Type>
 MITRE Technique: <Technique>
-
-MITRE ID: <MITRE ID>
-
+MITRE ID: <ID>
 Risk Score: <1-10>
 
 Explanation:
-<Detailed explanation>
+<Explanation>
 
 Remediation:
-<Bulleted remediation steps>
-
+<Remediation>
+        
 Alert:
 {alert}
 """
 
-    with st.spinner("Analyzing security alert..."):
-
+    with st.spinner("Analyzing alert..."):
         response = model.generate_content(prompt)
         result = response.text
-        iocs = extract_iocs(alert)
-        local_match = local_mitre_lookup(alert)
-        local_risk = calculate_risk(alert)
 
-        
+    iocs = extract_iocs(alert)
+    local_match = local_mitre_lookup(alert)
+    local_risk = calculate_risk(alert)
+    attack_chain = correlate_attack_chain(alert)
+    timeline = build_timeline(attack_chain)
 
-    st.success("Analysis Complete")
-
-    # -----------------------
-    # PARSING
-    # -----------------------
-
-    def extract(pattern, text, default="Undetermined"):
+    def extract(pattern, text, default="Unknown"):
         match = re.search(pattern, text, re.IGNORECASE)
         return match.group(1).strip() if match else default
 
-    severity = extract(
-        r"Severity:\s*(.+)",
-        result
-    )
+    severity = extract(r"Severity:\s*(.+)", result)
+    attack_type = extract(r"Attack Type:\s*(.+)", result)
+    mitre_id = extract(r"MITRE ID:\s*(.+)", result)
 
-    attack_type = extract(
-        r"Attack Type:\s*(.+)",
-        result
-    )
+    report_text = f"""
+CYBERPILOT AI INCIDENT REPORT
 
-    mitre_id = extract(
-        r"MITRE ID:\s*(.+)",
-        result
-    )
+Generated:
+{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-    risk_score = extract(
-        r"Risk Score:\s*(.+)",
-        result,
-        "N/A"
-    )
+Severity:
+{severity}
 
-    # -----------------------
-    # METRICS
-    # -----------------------
+Attack Type:
+{attack_type}
+
+MITRE ID:
+{mitre_id}
+
+Risk Score:
+{local_risk}
+
+INDICATORS OF COMPROMISE
+
+IPs:
+{", ".join(iocs["IPs"]) if iocs["IPs"] else "None"}
+
+Users:
+{", ".join(iocs["Users"]) if iocs["Users"] else "None"}
+
+Hosts:
+{", ".join(iocs["Hosts"]) if iocs["Hosts"] else "None"}
+
+EXECUTIVE SUMMARY
+
+Potential security incident analyzed by CyberPilot AI.
+
+RECOMMENDED ACTIONS
+
+Review logs.
+Investigate affected systems.
+Apply containment measures.
+Perform threat hunting.
+"""
 
     col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        st.metric(
-            "Severity",
-            severity
-        )
+    col1.metric("Severity", severity)
+    col2.metric("MITRE ID", mitre_id)
+    col3.metric("Attack Type", attack_type)
+    col4.metric("Risk Score", local_risk)
 
-    with col2:
-        st.metric(
-            "MITRE ID",
-            mitre_id
-        )
-
-    with col3:
-        st.metric(
-            "Attack Type",
-            attack_type
-        )
-
-    with col4:
-        st.metric(
-            "Risk Score",
-            local_risk
-        )
-
-    # -----------------------
-    # TABS
-    # -----------------------
-
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        [
-            "Incident Summary",
-            "MITRE Mapping",
-            "Remediation",
-            "IOCs",
-            "Executive Summary"
-        ]
-    )
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "Incident Summary",
+        "MITRE Mapping",
+        "Remediation",
+        "IOCs",
+        "Executive Summary",
+        "Incident Report",
+        "Correlation",
+        "Timeline"
+    ])
 
     with tab1:
-
-        st.subheader("Incident Analysis")
-
-        st.write(f"**Severity:** {severity}")
-        st.write(f"**Attack Type:** {attack_type}")
-        st.write(f"**MITRE ID:** {mitre_id}")
-        st.write(f"**Risk Score:** {risk_score}")
-
-        st.divider()
-
         st.markdown(result)
 
     with tab2:
+        st.subheader("MITRE Mapping")
 
-        st.markdown("### MITRE ATT&CK Mapping")
+        if local_match:
+            st.success("Local Detection Match")
+            st.json(local_match)
 
-    if local_match:
-
-        st.success("Local Detection Engine Match")
-
-        st.json(local_match)
-
-        st.info(
-        f"""
-MITRE ID: {mitre_id}
-
-Attack Type: {attack_type}
-"""
-    )
+        st.info(f"MITRE ID: {mitre_id}")
 
     with tab3:
-
-        st.subheader("Remediation Guidance")
-
         remediation_match = re.search(
             r"Remediation:(.*)",
             result,
             re.IGNORECASE | re.DOTALL
         )
+
+        if remediation_match:
+            st.markdown(remediation_match.group(1))
+
     with tab4:
-
-        st.markdown("### IOC Intelligence")
-
         st.json(iocs)
 
-    if iocs["IPs"]:
-
-        st.markdown("#### IP Analysis")
-
-        for ip in iocs["IPs"]:
-
-            if ip.startswith(("10.", "172.", "192.168.")):
-
-                st.success(
-                    f"{ip} → Private/Internal IP"
-                )
-
-            else:
-
-                st.error(
-                    f"{ip} → Public IP (Investigate)"
-                )
     with tab5:
 
-        st.markdown("## Executive Summary")
+        st.write(f"Severity: {severity}")
+        st.write(f"Risk Score: {local_risk}")
+        st.write(f"Attack Type: {attack_type}")
 
-        st.write(
-        f"""
-Severity: {severity}
+        if local_risk >= 8:
+            st.error("Immediate SOC investigation recommended.")
+        elif local_risk >= 5:
+            st.warning("Medium priority incident.")
+        else:
+            st.success("Low priority incident.")
 
-Risk Score: {local_risk}
+    with tab6:
 
-Attack Type: {attack_type}
+        st.text_area(
+            "Generated Report",
+            report_text,
+            height=400
+        )
 
-MITRE Technique: {mitre_id}
-"""
+        txt_col, pdf_col = st.columns(2)
+
+        with txt_col:
+            st.download_button(
+                "📄 Download TXT Report",
+                data=report_text,
+                file_name="CyberPilot_Report.txt",
+                mime="text/plain"
+            )
+
+        with pdf_col:
+            pdf_data = generate_pdf_report(report_text)
+
+            st.download_button(
+                "📕 Download PDF Report",
+                data=pdf_data,
+                file_name="CyberPilot_Report.pdf",
+                mime="application/pdf"
+            )
+    with tab7:
+
+        st.subheader(
+        "Attack Correlation Engine"
     )
 
-    if local_risk >= 8:
+    if attack_chain:
 
-        st.error(
-            "Immediate SOC investigation recommended."
+        st.success(
+            "Multi-Stage Attack Detected"
         )
 
-    elif local_risk >= 5:
+        for stage in attack_chain:
 
-        st.warning(
-            "Medium priority incident."
-        )
+            st.write(
+                f"• {stage}"
+            )
 
     else:
 
-        st.success(
-            "Low priority incident."
+        st.info(
+            "No attack chain identified."
+        )
+    with tab8:
+
+        st.subheader(
+        "Incident Timeline"
+    )
+
+    if timeline:
+
+        for event in timeline:
+
+            st.write(event)
+
+    else:
+
+        st.info(
+            "No timeline available."
         )
