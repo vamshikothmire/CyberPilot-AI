@@ -117,10 +117,9 @@ Recommended Actions:
 * Monitor for lateral movement
 
 ---
+  ## Current Version
 
-## Current Version
-
-### v0.4
+CyberPilot AI v0.8
 
 * SOC Dashboard
 * Gemini Security Analysis
@@ -134,19 +133,6 @@ Recommended Actions:
 
 ## Future Roadmap
 
-### v0.5
-
-* Incident Report Generator
-* Downloadable Reports
-
-### v0.6
-
-* PDF Report Export
-
-### v0.7
-
-* Multi-Alert Correlation
-
 ### v1.0
 
 * Full AI SOC Analyst Platform
@@ -154,7 +140,20 @@ Recommended Actions:
 * Security Knowledge Base
 * Detection Engineering Support
 
----
+
+
+### Roadmap
+
+- [x] v0.1 Alert Analysis
+- [x] v0.2 Dashboard UI
+- [x] v0.3 IOC Extraction
+- [x] v0.4 Threat Intelligence
+- [x] v0.5 Incident Reports
+- [x] v0.6 PDF Export
+- [x] v0.7 Correlation Engine
+- [x] v0.8 Timeline Engine
+- [ ] v0.9 Threat Hunting Assistant
+- [ ] v1.0 AI SOC Analyst Platform
 
 ## Author
 
