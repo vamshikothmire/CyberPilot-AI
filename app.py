@@ -288,6 +288,8 @@ Alert:
     severity = extract(r"Severity:\s*(.+)", result)
     attack_type = extract(r"Attack Type:\s*(.+)", result)
     mitre_id = extract(r"MITRE ID:\s*(.+)", result)
+    if local_match:
+        mitre_id = local_match["id"]
 
     report_text = f"""
 CYBERPILOT AI INCIDENT REPORT
